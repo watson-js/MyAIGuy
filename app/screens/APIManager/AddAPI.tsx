@@ -27,41 +27,83 @@ const AddAPI = () => {
         active: true,
     })
     const [modelList, setModelList] = useState<any[]>([])
+    const [isLoading, setIsLoading] = useState(false)
 
     const handleGetModelList = async () => {
         if (!template.features.useModel) return
+        
+        if (!values.modelEndpoint) {
+            Logger.warn('Model endpoint is not defined')
+            return
+        }
+        
+        if (template.features.useKey && (!values.key || values.key.trim() === '')) {
+            Logger.warn('API key is required but not provided')
+            return
+        }
 
-        const auth: any = {}
-        if (template.features.useKey) {
-            auth[template.request.authHeader] = template.request.authPrefix + values.key
-            if (template.name === 'Claude') {
-                auth['anthropic-version'] = CLAUDE_VERSION
+        setIsLoading(true)
+        try {
+            const auth: any = {}
+            if (template.features.useKey) {
+                auth[template.request.authHeader] = template.request.authPrefix + values.key
+                if (template.name === 'Claude') {
+                    auth['anthropic-version'] = CLAUDE_VERSION
+                }
             }
+            
+            const result = await fetch(values.modelEndpoint, { 
+                headers: { ...auth },
+                method: 'GET'
+            })
+            
+            const data = await result.json()
+            
+            if (result.status !== 200) {
+                Logger.error(`Could not retrieve models: ${data?.error?.message || 'Unknown error'}`)
+                return
+            }
+            
+            const models = getNestedValue(data, template.model.modelListParser)
+            const isArray = Array.isArray(models)
+            
+            if (!models || !isArray) {
+                Logger.warn('Could not parse models!')
+                if (!models) {
+                    Logger.error('Models resulted in an undefined value')
+                } else if (!isArray) {
+                    Logger.error(
+                        'Models resulted in a non-array value. `modelListParser` of template is likely incorrect'
+                    )
+                }
+                return
+            }
+            
+            setModelList(models)
+        } catch (error) {
+            Logger.error(`Error fetching models: ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+            setIsLoading(false)
         }
-        const result = await fetch(values.modelEndpoint, { headers: { ...auth } })
-        const data = await result.json()
-        if (result.status !== 200) {
-            Logger.error(`Could not retrieve models: ${data?.error?.message}`)
-            return
-        }
-        const models = getNestedValue(data, template.model.modelListParser)
-        const isArray = Array.isArray(models)
-        if (!models || !isArray) {
-            Logger.warn('Could not parse models!')
-            if (!models) {
-                Logger.error('Models resulted in an undefined value')
-            } else if (!isArray)
-                Logger.error(
-                    'Models resulted in an non-array value. `modelListParser` of template is likely incorrect'
-                )
-            return
-        }
-        setModelList(models)
     }
 
     useEffect(() => {
-        handleGetModelList()
+        if (template.features.useModel && 
+            values.modelEndpoint && 
+            (!template.features.useKey || (template.features.useKey && values.key))) {
+            handleGetModelList()
+        }
     }, [template])
+
+    useEffect(() => {
+        if (template.features.useModel && 
+            values.modelEndpoint && 
+            template.features.useKey && 
+            values.key && 
+            values.key.trim() !== '') {
+            handleGetModelList()
+        }
+    }, [values.key])
 
     return (
         <View style={styles.mainContainer}>
@@ -191,9 +233,10 @@ const AddAPI = () => {
                                 onPress={() => {
                                     handleGetModelList()
                                 }}
-                                iconName="reload1"
+                                iconName={isLoading ? "loading1" : "reload1"}
                                 iconSize={18}
                                 variant="secondary"
+                                disabled={isLoading}
                             />
                         </View>
                     </View>
